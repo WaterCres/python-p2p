@@ -115,14 +115,12 @@ class NodeConnection(threading.Thread):
 
 
 class Node(threading.Thread):
-    def __init__(self, host="", port=65432, file_port=65433):
+    def __init__(self, host="", port=65432):#, file_port=65433):
         super(Node, self).__init__()
 
         self.terminate_flag = threading.Event()
         self.pinger = Pinger(self)  # start pinger
-        self.file_manager = FileManager()
-        self.fileServer = fileServer(self, file_port)
-        self.debug = True
+        self.debug = False
 
         self.dead_time = (
             45  # time to disconect from node if not pinged, nodes ping after 20s
@@ -131,7 +129,6 @@ class Node(threading.Thread):
         self.host = host
         self.ip = host  # own ip, will be changed by connection later
         self.port = port
-        self.file_port = file_port
 
         self.nodes_connected = []
 
@@ -150,9 +147,6 @@ class Node(threading.Thread):
 
         self.banned = []
         portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
-        portforwardlib.forwardPort(
-            file_port, file_port, None, None, False, "TCP", 0, "", True
-        )
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -233,21 +227,10 @@ class Node(threading.Thread):
             "PYHTON-P2P-NODE",
             True,
         )
-        portforwardlib.forwardPort(
-            self.host,
-            self.file_port,
-            None,
-            None,
-            True,
-            "TCP",
-            0,
-            "PYHTON-P2P-FILESERVER",
-            True,
-        )
 
     def run(self):
         self.pinger.start()
-        self.fileServer.start()
+        # self.fileServer.start()
         while (
             not self.terminate_flag.is_set()
         ):  # Check whether the thread needs to be closed
@@ -282,7 +265,6 @@ class Node(threading.Thread):
             time.sleep(0.01)
 
         self.pinger.stop()
-        self.fileServer.stop()
         for t in self.nodes_connected:
             t.stop()
 
@@ -308,7 +290,7 @@ class Node(threading.Thread):
 
         if "snid" not in dict:
             # sender node id
-            dict["snid"] = str(self.id)
+            dict["snid"] = str(self.host)
 
         if "rnid" not in dict:
             # reciever node id

@@ -80,7 +80,7 @@ def get_wanip_path(upnp_url):
         # I'm using the fact that a 'serviceType' element contains a single text node, who's data can
         # be accessed by the 'data' attribute.
         # When I find the right element, I take a step up into its parent and search for 'controlURL'
-        if service.childNodes[0].data.find("WANIPConnection") > 0:
+        if service.childNodes[0].data.find("WANIPConnection") > 0 or service.childNodes[0].data.find("WANPPPConnection") > 0:
             path = (
                 service.parentNode.getElementsByTagName("controlURL")[0]
                 .childNodes[0]
@@ -174,23 +174,25 @@ def open_port(
     pure_xml = doc.toxml()
 
     # use the object returned by urlparse.urlparse to get the hostname and port
-    conn = http.client.HTTPConnection(parsedurl.hostname, parsedurl.port)
+    try:
+        conn = http.client.HTTPConnection(parsedurl.hostname, parsedurl.port)
+        # use the path of WANIPConnection (or WANPPPConnection) to target that service,
+        # insert the xml payload,
+        # add two headers to make tell the server what we're sending exactly.
+        conn.request(
+            "POST",
+            parsedurl.path,
+            pure_xml,
+            {
+                "SOAPAction": '"urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping"',
+                "Content-Type": "text/xml",
+            },
+        )
 
-    # use the path of WANIPConnection (or WANPPPConnection) to target that service,
-    # insert the xml payload,
-    # add two headers to make tell the server what we're sending exactly.
-    conn.request(
-        "POST",
-        parsedurl.path,
-        pure_xml,
-        {
-            "SOAPAction": '"urn:schemas-upnp-org:service:WANIPConnection:1#AddPortMapping"',
-            "Content-Type": "text/xml",
-        },
-    )
-
-    # wait for a response
-    resp = conn.getresponse()
+        # wait for a response
+        resp = conn.getresponse()
+    except ValueError as e:
+        return 400,e
 
     return resp.status, resp.read()
 
