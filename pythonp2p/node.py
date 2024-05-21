@@ -4,10 +4,9 @@ import json
 import sys
 import time
 import hashlib
-from .file_transfer import FileDownloader, fileServer, FileManager
+import ipaddress
 from . import portforwardlib
 from . import crypto_funcs as cf
-import ipaddress
 
 msg_del_time = 30
 PORT = 65432
@@ -285,12 +284,15 @@ class Node(threading.Thread):
     def message(self, type, data, overides={}, ex=[]):
         # time that the message was sent
         dict = {"type": type, "data": data}
-        if "time" not in dict:
-            dict["time"] = str(time.time())
+        
 
         if "snid" not in dict:
             # sender node id
-            dict["snid"] = str(self.host)
+            dict["snid"] = str(self.id)
+
+        if "sndr" not in dict:
+            # sender node ip
+            dict["sndr"] = str(self.host)
 
         if "rnid" not in dict:
             # reciever node id
@@ -300,6 +302,10 @@ class Node(threading.Thread):
             dict["sig"] = cf.sign(data, self.private_key)
 
         dict = {**dict, **overides}
+
+        if "time" not in dict:
+            dict["time"] = str(time.time_ns())
+        
         self.network_send(dict, ex)
 
     def send_peers(self):
@@ -358,6 +364,7 @@ class Node(threading.Thread):
             return False
 
     def data_handler(self, dta, n):
+        now = time.time_ns()
         if not self.check_validity(dta):
             return False
 
@@ -384,37 +391,23 @@ class Node(threading.Thread):
             return True
 
         if type == "msg":
-            self.on_message(data, dta["snid"], bool(dta["rnid"]))
+            self.on_message(data, dta["sndr"], bool(dta["rnid"]))
 
-        if type == "req":
-            if self.file_manager.have_file(data):
-                self.message(
-                    "resp",
-                    data,
-                    {"ip": self.ip, "localip": self.local_ip},
-                )
-                self.debug_print(
-                    "recieved request for file: " + data + " and we have it."
-                )
+        if type == "delay":
+            if dta['init'] == self.id:
+                # measure delay
+                t0 = int(data['t0'])
+                t1 = int(data['t1'])
+                t2 = int(dta['time'])
+                t3 = now
+                delay = (t3-t0) - (t2-t1)
+                # do some fancy shit with this delay
+                self.delay_resp(delay,dta['sndr'])
             else:
-                self.debug_print(
-                    "recieved request for file: " + data + " but we do not have it."
-                )
-
-        if type == "resp":
-            self.debug_print("node: " + dta["snid"] + " has file " + data)
-            if data in self.requested:
-                print("node " + dta["snid"] + " has our file!")
-                if dta["ip"] == "":
-                    if dta["localip"] != "":
-                        ip = dta["localip"]
-                else:
-                    ip = dta["ip"]
-
-                downloader = FileDownloader(
-                    ip, FILE_PORT, str(data), self.fileServer.dirname, self.file_manager
-                )
-                downloader.start()
+                # respond with t1 and t2
+                data['t0'] = dta['time']
+                data['t1'] = str(now)
+                self.message("delay",data)
 
     def check_ip_to_connect(self, ip):
         if (
@@ -429,7 +422,13 @@ class Node(threading.Thread):
             return False
 
     def on_message(self, data, sender, private):
-        self.debug_print("Incomig Message: " + data)
+        raise NotImplementedError
+
+    def delay_query(self, rec):
+        raise NotImplementedError
+    
+    def delay_resp(self, delay, peer):
+        raise NotImplementedError
 
     def loadstate(self, file="state.json"):
         with open(file, "r") as f:
@@ -440,20 +439,6 @@ class Node(threading.Thread):
     def savestate(self, file="state.json"):
         with open(file, "w+") as f:
             json.dump(self.peers, f)
-
-    def requestFile(self, fhash):
-        if fhash not in self.requested and fhash not in self.file_manager.getallfiles():
-            self.requested.append(fhash)
-            self.message("req", fhash)
-
-    def addfile(self, path):
-        s = self.file_manager.addfile(path)
-        self.file_manager.refresh()
-        return s
-
-    def setfiledir(self, path):
-        self.fileServer.dirname = path
-        self.file_manager.download_path = path
 
     def node_connected(self, node):
         self.debug_print("node_connected: " + node.id)
@@ -470,7 +455,7 @@ class Node(threading.Thread):
         try:
             json.loads(data)
         except json.decoder.JSONDecodeError:
-            self.debug_print(f"Error loading message from {node.id}")
+            self.debug_print(f"Error loading message from {node.host}")
             return
         self.data_handler(json.loads(data), [node.host, self.ip])
 
