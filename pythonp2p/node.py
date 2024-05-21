@@ -114,7 +114,7 @@ class NodeConnection(threading.Thread):
 
 
 class Node(threading.Thread):
-    def __init__(self, host="", port=65432):#, file_port=65433):
+    def __init__(self, host="", port=65432):
         super(Node, self).__init__()
 
         self.terminate_flag = threading.Event()
@@ -402,7 +402,7 @@ class Node(threading.Thread):
                 t3 = now
                 delay = (t3-t0) - (t2-t1)
                 # do some fancy shit with this delay
-                self.delay_resp(delay,dta['sndr'])
+                self.delay_resp(delay, dta['sndr'])
             else:
                 # respond with t1 and t2
                 data['t0'] = dta['time']
