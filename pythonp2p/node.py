@@ -292,7 +292,7 @@ class Node(threading.Thread):
 
         if "sndr" not in dict:
             # sender node ip
-            dict["sndr"] = str(self.host)
+            dict["sndr"] = str(self)
 
         if "rnid" not in dict:
             # reciever node id
