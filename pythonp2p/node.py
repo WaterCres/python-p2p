@@ -121,10 +121,12 @@ class Node(threading.Thread):
         self.pinger = Pinger(self)  # start pinger
         self.debug = False
 
-        # a list of known streams
+        # a map of known streams
         self.streams = {}
-        # a list of viewers
+        # a map of viewers
         self.viewers = {}
+        # a map of delays to peers
+        self.delays = {}
 
         self.dead_time = (
             45  # time to disconect from node if not pinged, nodes ping after 20s
