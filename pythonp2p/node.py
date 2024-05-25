@@ -469,7 +469,7 @@ class Node(threading.Thread):
         if node.host not in self.peers:
             self.peers.append(node.host)
         self.send_peers()
-        self.send_strms()
+        self.send_streams()
 
     def node_disconnected(self, node):
         self.debug_print("node_disconnected: " + node.id)
