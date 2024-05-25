@@ -121,6 +121,11 @@ class Node(threading.Thread):
         self.pinger = Pinger(self)  # start pinger
         self.debug = False
 
+        # a list of known streams
+        self.streams = {}
+        # a list of viewers
+        self.viewers = {}
+
         self.dead_time = (
             45  # time to disconect from node if not pinged, nodes ping after 20s
         )
@@ -310,6 +315,9 @@ class Node(threading.Thread):
 
     def send_peers(self):
         self.message("peers", self.peers)
+    
+    def send_streams(self):
+        self.message("strm", self.streams)
 
     def check_validity(self, msg):
         if not (
@@ -379,35 +387,51 @@ class Node(threading.Thread):
 
         type = dta["type"]
         data = dta["data"]
+        match type:
+            case "peers":
+                # peers handling
+                for i in data:
+                    if self.check_ip_to_connect(i):
+                        self.peers.append(i)
 
-        if type == "peers":
-            # peers handling
-            for i in data:
-                if self.check_ip_to_connect(i):
-                    self.peers.append(i)
+                self.debug_print("Known Peers: " + str(self.peers))
+                self.ConnectToNodes()  # cpnnect to new nodes
+                return True
 
-            self.debug_print("Known Peers: " + str(self.peers))
-            self.ConnectToNodes()  # cpnnect to new nodes
-            return True
+            case "msg":
+                self.on_message(data, dta["sndr"], bool(dta["rnid"]))
 
-        if type == "msg":
-            self.on_message(data, dta["sndr"], bool(dta["rnid"]))
+            case "strm":
+                self.streams.update(data)
 
-        if type == "delay":
-            if dta['init'] == self.id:
-                # measure delay
-                t0 = int(data['t0'])
-                t1 = int(data['t1'])
-                t2 = int(dta['time'])
-                t3 = now
-                delay = (t3-t0) - (t2-t1)
-                # do some fancy shit with this delay
-                self.delay_resp(delay, dta['sndr'])
-            else:
-                # respond with t1 and t2
-                data['t0'] = dta['time']
-                data['t1'] = str(now)
-                self.message("delay",data)
+            case "clsd":
+                self.streams.pop(data)
+
+            case "watch":
+                self.viewers.update(data)
+
+            case "leave":
+                self.viewers.pop(data)
+
+            case "delay":
+                if dta['init'] == self.id:
+                    # measure delay
+                    t0 = int(data['t0'])
+                    t1 = int(data['t1'])
+                    t2 = int(dta['time'])
+                    t3 = now
+                    delay = (t3-t0) - (t2-t1)
+                    # do some fancy shit with this delay
+                    self.delay_resp(delay, dta['sndr'])
+                else:
+                    # respond with t1 and t2
+                    data['t0'] = dta['time']
+                    data['t1'] = str(now)
+                    self.message("delay",data)
+            case _:
+                return False
+        return True
+
 
     def check_ip_to_connect(self, ip):
         if (
@@ -445,6 +469,7 @@ class Node(threading.Thread):
         if node.host not in self.peers:
             self.peers.append(node.host)
         self.send_peers()
+        self.send_strms()
 
     def node_disconnected(self, node):
         self.debug_print("node_disconnected: " + node.id)
