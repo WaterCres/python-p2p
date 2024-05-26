@@ -467,7 +467,7 @@ class Node(threading.Thread):
 
     def delay_query(self, rec):
         raise NotImplementedError
-    
+
     def delay_resp(self, delay, peer):
         raise NotImplementedError
 
