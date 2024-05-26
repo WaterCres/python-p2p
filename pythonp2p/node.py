@@ -5,7 +5,7 @@ import sys
 import time
 import hashlib
 import ipaddress
-import miniupnpc
+import urllib.request as req
 from . import portforwardlib
 from . import crypto_funcs as cf
 
@@ -135,13 +135,9 @@ class Node(threading.Thread):
             45  # time to disconect from node if not pinged, nodes ping after 20s
         )
 
-        con = miniupnpc.UPnP()
-        con.discoverdelay = 200
-        con.discover()
-        con.selectigd()
 
         self.host = host
-        self.ip = con.externalipaddress()  # own ip, will be changed by connection later
+        self.ip = req.urlopen('https://v4.ident.me').read().decode('utf8')  # own ip, will be changed by connection later
         self.port = port
 
         self.nodes_connected = []
@@ -155,14 +151,14 @@ class Node(threading.Thread):
 
         self.max_peers = 10
 
-        hostname = socket.gethostname()
         # accuratly get local ip
-        self.local_ip = con.lanaddr
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('1.1.1.1',80))
+        self.local_ip = s.getsockname()[0]
+        s.close()
 
         self.banned = []
-        con.selectigd()
-        con.addportmapping(port, 'TCP', con.lanaddr, port, "p2p-port", '')
-        # portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
+        portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -232,22 +228,17 @@ class Node(threading.Thread):
 
     def stop(self):
         self.terminate_flag.set()
-        con = miniupnpc.UPnP()
-        con.discoverdelay = 200
-        con.discover()
-        con.selectigd()
-        con.deleteportmapping(self.port,"TCP")
-        # portforwardlib.forwardPort(
-        #     self.host,
-        #     self.port,
-        #     None,
-        #     None,
-        #     True,
-        #     "TCP",
-        #     0,
-        #     "PYHTON-P2P-NODE",
-        #     True,
-        # )
+        portforwardlib.forwardPort(
+            self.host,
+            self.port,
+            None,
+            None,
+            True,
+            "TCP",
+            0,
+            "PYHTON-P2P-NODE",
+            True,
+        )
 
     def run(self):
         self.pinger.start()
@@ -425,14 +416,16 @@ class Node(threading.Thread):
                 self.streams.remove(data)
 
             case "watch":
-                self.viewers.append(data)
+                tup = (data[0],data[1])
+                self.viewers.append(tup)
                 if self.pipe:
-                    self.pipe.send(('a',(data[0],data[1])))
+                    self.pipe.send(('a',tup))
 
             case "leave":
-                self.viewers.remove(data)
+                tup = (data[0],data[1])
+                self.viewers.remove(tup)
                 if self.pipe:
-                    self.pipe.send(('r',(data[0],data[1])))
+                    self.pipe.send(('r',tup))
 
             case "delay":
                 if dta['init'] == self.id:
