@@ -136,7 +136,7 @@ class Node(threading.Thread):
         )
 
 
-        self.host = host
+        self.host = socket.gethostname()
         self.ip = req.urlopen('https://v4.ident.me').read().decode('utf8')  # own ip, will be changed by connection later
         self.port = port
 
@@ -153,13 +153,10 @@ class Node(threading.Thread):
 
         # accuratly get local ip
         # this is a fix to handle odd settings in /etc/hosts
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('1.1.1.1',80))
-        self.local_ip = s.getsockname()[0]
-        s.close()
+        self.local_ip = portforwardlib.get_my_ip()
 
         self.banned = []
-        portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
+        portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", False)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -411,7 +408,8 @@ class Node(threading.Thread):
                 self.on_message(data, dta["sndr"], bool(dta["rnid"]))
 
             case "strm":
-                self.streams.append(data)
+                if data != []:
+                    self.streams.append(data)
 
             case "clsd":
                 self.streams.remove(data)
@@ -424,6 +422,9 @@ class Node(threading.Thread):
 
             case "leave":
                 tup = (data[0],data[1])
+                print(self.viewers)
+                print(tup)
+                print(data)
                 self.viewers.remove(tup)
                 if self.pipe:
                     self.pipe.send(('r',tup))

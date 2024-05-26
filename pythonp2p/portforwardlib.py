@@ -259,10 +259,11 @@ def forwardPort(
                     )
                 )
         else:
-            sys.stderr.write(
-                "%sport forward on %s failed, status=%s message=%s\n"
-                % (dis, routerip, status, message)
-            )
-            allok = False
+            if verbose:
+                sys.stderr.write(
+                    "%sport forward on %s failed, status=%s message=%s\n"
+                    % (dis, routerip, status, message)
+                )
+                allok = False
 
     return allok
