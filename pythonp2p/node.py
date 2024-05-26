@@ -5,6 +5,7 @@ import sys
 import time
 import hashlib
 import ipaddress
+import miniupnpc
 from . import portforwardlib
 from . import crypto_funcs as cf
 
@@ -134,8 +135,13 @@ class Node(threading.Thread):
             45  # time to disconect from node if not pinged, nodes ping after 20s
         )
 
+        con = miniupnpc.UPnP()
+        con.discoverdelay = 200
+        con.discover()
+        con.selectigd()
+
         self.host = host
-        self.ip = host  # own ip, will be changed by connection later
+        self.ip = con.externalipaddress()  # own ip, will be changed by connection later
         self.port = port
 
         self.nodes_connected = []
@@ -150,11 +156,13 @@ class Node(threading.Thread):
         self.max_peers = 10
 
         hostname = socket.gethostname()
-
-        self.local_ip = socket.gethostbyname(hostname)
+        # accuratly get local ip
+        self.local_ip = con.lanaddr
 
         self.banned = []
-        portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
+        con.selectigd()
+        con.addportmapping(port, 'TCP', con.lanaddr, port, "p2p-port", '')
+        # portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", True)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -224,17 +232,22 @@ class Node(threading.Thread):
 
     def stop(self):
         self.terminate_flag.set()
-        portforwardlib.forwardPort(
-            self.host,
-            self.port,
-            None,
-            None,
-            True,
-            "TCP",
-            0,
-            "PYHTON-P2P-NODE",
-            True,
-        )
+        con = miniupnpc.UPnP()
+        con.discoverdelay = 200
+        con.discover()
+        con.selectigd()
+        con.deleteportmapping(self.port,"TCP")
+        # portforwardlib.forwardPort(
+        #     self.host,
+        #     self.port,
+        #     None,
+        #     None,
+        #     True,
+        #     "TCP",
+        #     0,
+        #     "PYHTON-P2P-NODE",
+        #     True,
+        # )
 
     def run(self):
         self.pinger.start()
