@@ -152,6 +152,7 @@ class Node(threading.Thread):
         self.max_peers = 10
 
         # accuratly get local ip
+        # this is a fix to handle odd settings in /etc/hosts
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('1.1.1.1',80))
         self.local_ip = s.getsockname()[0]
