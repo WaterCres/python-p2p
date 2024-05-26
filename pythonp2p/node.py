@@ -122,9 +122,11 @@ class Node(threading.Thread):
         self.debug = False
 
         # a map of known streams
-        self.streams = {}
+        self.streams = []
         # a map of viewers
-        self.viewers = {}
+        self.viewers = []
+        # a pipe to talk to a child
+        self.pipe = None
         # a map of delays to peers
         self.delays = {}
 
@@ -404,16 +406,20 @@ class Node(threading.Thread):
                 self.on_message(data, dta["sndr"], bool(dta["rnid"]))
 
             case "strm":
-                self.streams.update(data)
+                self.streams.append(data)
 
             case "clsd":
-                self.streams.pop(data)
+                self.streams.remove(data)
 
             case "watch":
-                self.viewers.update(data)
+                self.viewers.append(data)
+                if self.pipe:
+                    self.pipe.send(('a',(data[0],data[1])))
 
             case "leave":
-                self.viewers.pop(data)
+                self.viewers.remove(data)
+                if self.pipe:
+                    self.pipe.send(('r',(data[0],data[1])))
 
             case "delay":
                 if dta['init'] == self.id:
