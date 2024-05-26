@@ -422,9 +422,6 @@ class Node(threading.Thread):
 
             case "leave":
                 tup = (data[0],data[1])
-                print(self.viewers)
-                print(tup)
-                print(data)
                 self.viewers.remove(tup)
                 if self.pipe:
                     self.pipe.send(('r',tup))
