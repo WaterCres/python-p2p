@@ -132,7 +132,7 @@ class Node(threading.Thread):
         self.delays = {}
 
         self.dead_time = (
-            45  # time to disconect from node if not pinged, nodes ping after 20s
+            22  # time to disconect from node if not pinged, nodes ping after 20s
         )
 
 
@@ -303,7 +303,7 @@ class Node(threading.Thread):
 
         if "sndr" not in dict:
             # sender node ip
-            dict["sndr"] = str(self)
+            dict["sndr"] = self.ip
 
         if "rnid" not in dict:
             # reciever node id
@@ -316,12 +316,12 @@ class Node(threading.Thread):
 
         if "time" not in dict:
             dict["time"] = str(time.time_ns())
-        
+
         self.network_send(dict, ex)
 
     def send_peers(self):
         self.message("peers", self.peers)
-    
+
     def send_streams(self):
         self.message("strm", self.streams)
 
@@ -406,6 +406,10 @@ class Node(threading.Thread):
 
             case "msg":
                 self.on_message(data, dta["sndr"], bool(dta["rnid"]))
+
+            case "stop":
+                self.nodes_connected = [node for node in self.nodes_connected if str(node.host) != str(dta['sndr'])]
+
 
             case "strm":
                 if data != []:
@@ -515,5 +519,5 @@ class Pinger(threading.Thread):
         ):  # Check whether the thread needs to be closed
             for i in self.parent.nodes_connected:
                 i.send("ping")
-                time.sleep(20)
+                time.sleep(5)
         print("Pinger stopped")
