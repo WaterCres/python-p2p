@@ -13,7 +13,7 @@ msg_del_time = 30
 PORT = 65432
 FILE_PORT = 65433
 
-
+## shits on fire yo
 class NodeConnection(threading.Thread):
     def __init__(self, main_node, sock, id, host, port):
 
