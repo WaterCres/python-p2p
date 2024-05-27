@@ -437,8 +437,8 @@ class Node(threading.Thread):
             case "delay":
                 if dta['init'] == self.id:
                     # measure delay
-                    t0 = int(data['t0'])
-                    t1 = int(data['t1'])
+                    t0 = int(dta['t0'])
+                    t1 = int(dta['t1'])
                     t2 = int(dta['time'])
                     t3 = now
                     delay = (t3-t0) - (t2-t1)
@@ -446,10 +446,9 @@ class Node(threading.Thread):
                     self.delay_resp(delay, dta['sndr'])
                 else:
                     # respond with t1 and t2
-                    data = {
-                        't0':dta['time'],
-                        't1':str(now)}
-                    self.message("delay", data, {'rnid':dta['snid']})
+                    self.message("delay", "", {'rnid':dta['snid'],
+                                                 't0':dta['time'],
+                                                 't1':str(now)})
             case _:
                 return False
         return True
