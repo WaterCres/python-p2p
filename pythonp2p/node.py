@@ -13,7 +13,7 @@ msg_del_time = 30
 PORT = 65432
 FILE_PORT = 65433
 
-## shits on fire yo
+
 class NodeConnection(threading.Thread):
     def __init__(self, main_node, sock, id, host, port):
 
@@ -129,7 +129,7 @@ class Node(threading.Thread):
         # a map of viewers
         self.viewers = []
         # a pipe to talk to a child
-        self.pipe = None
+        self.pipe = {}
         # a map of delays to peers
         self.delays = {}
 
@@ -287,8 +287,9 @@ class Node(threading.Thread):
 
     def ConnectToNodes(self):
         for i in self.peers:
-            if not self.connect_to(i, PORT):
-                del self.peers[self.peers.index(i)]  # delete wrong / own ip from peers
+            self.connect_to(i.host,PORT)
+            # if not self.connect_to(i, PORT):
+                #del self.peers[self.peers.index(i)]  # delete wrong / own ip from peers
 
     def send_message(self, data, reciever=None):
         # time that the message was sent
@@ -307,7 +308,7 @@ class Node(threading.Thread):
 
         if "sndr" not in dict:
             # sender node ip
-            dict["sndr"] = self.ip
+            dict["sndr"] = self.local_ip
 
         if "rnid" not in dict:
             # reciever node id
@@ -425,14 +426,18 @@ class Node(threading.Thread):
             case "watch":
                 tup = (data[0],data[1])
                 self.viewers.append(tup)
-                if self.pipe:
-                    self.pipe.send(('a',tup))
+                if self.pipe['str']:
+                    self.pipe['str'].send(('a',tup))
+                if self.pipe['wat']:
+                    self.pipe['wat'].send(('a',tup))
 
             case "leave":
                 tup = (data[0],data[1])
                 self.viewers.remove(tup)
-                if self.pipe:
-                    self.pipe.send(('r',tup))
+                if self.pipe['str']:
+                    self.pipe['str'].send(('r',tup))
+                if self.pipe['wat']:
+                    self.pipe['wat'].send(('a',tup))
 
             case "delay":
                 if dta['init'] == self.id:
@@ -443,10 +448,18 @@ class Node(threading.Thread):
                     t3 = now
                     delay = (t3-t0) - (t2-t1)
                     # do some fancy shit with this delay
-                    self.delay_resp(delay, dta['sndr'])
+                    self.delay_resp(delay, dta)
                 else:
+                    # the delay has been calculated and neds to be propagated
+                    if "dl_rsp" in data:
+                        delay = data.split(':')[1]
+                        self.delays[dta['sndr']] = int(delay)
+                        print(self.delays)
+                        return True
                     # respond with t1 and t2
-                    self.message("delay", "", {'rnid':dta['snid'],
+                    data = cf.encrypt("delay", cf.load_key(dta['snid']))
+                    self.message("delay", data, {'init':dta['init'],
+                                                'rnid':dta['snid'],
                                                  't0':dta['time'],
                                                  't1':str(now)})
             case _:
@@ -479,7 +492,7 @@ class Node(threading.Thread):
         with open(file, "r") as f:
             peers = json.load(f)
         for i in peers:
-            self.connect_to(i)
+            self.connect_to(i.host)
 
     def savestate(self, file="state.json"):
         with open(file, "w+") as f:
@@ -487,15 +500,15 @@ class Node(threading.Thread):
 
     def node_connected(self, node):
         self.debug_print("node_connected: " + node.id)
-        if node.host not in self.peers:
-            self.peers.append(node.host)
+        if node not in self.peers:
+            self.peers.append(node)
         self.send_peers()
         self.send_streams()
 
     def node_disconnected(self, node):
         self.debug_print("node_disconnected: " + node.id)
-        if node.host in self.peers:
-            self.peers.remove(node.host)
+        if node in self.peers:
+            self.peers.remove(node)
 
     def node_message(self, node, data):
         try:
@@ -531,6 +544,7 @@ class Delay(threading.Thread):
     def __init__(self, parent):
         self.terminate_flag = threading.Event()
         self.delay_flag = threading.Event()
+        self.empty_delay_flag = threading.Event()
         
         super(Delay, self).__init__()  #call Thread.__init__()
         self.parent = parent
@@ -545,11 +559,14 @@ class Delay(threading.Thread):
         while (not self.terminate_flag.is_set()): 
             if(self.delay_flag.is_set()):
                 print("Delay flag set")
-                print("Connected: ", self.parent.nodes_connected)
-                print("parent", self.parent.ip)
-                for i in self.parent.nodes_connected:
-                    print("Delay query", i)
-                    #Ping for new delays (response handled in connect.py)
-                    self.parent.delay_query(i)
+                
+                for i in self.parent.peers:
+                    if i.host not in self.parent.delays.keys():
+                        # get delay to neighbour if unknown
+                        print("Delay query", i)
+                        #Ping for new delays (response handled in connect.py)
+                        self.parent.delay_query(i)
+                
                 self.delay_flag.clear()
+                
         print("Delay handler stopped")
