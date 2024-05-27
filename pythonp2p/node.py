@@ -445,7 +445,7 @@ class Node(threading.Thread):
                     data = {
                         't0':dta['time'],
                         't1':str(now)}
-                    self.send_message(data, dta['snid'])
+                    self.message("delay", data, {'rnid':dta['snid']})
             case _:
                 return False
         return True
