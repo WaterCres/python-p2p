@@ -120,6 +120,8 @@ class Node(threading.Thread):
 
         self.terminate_flag = threading.Event()
         self.pinger = Pinger(self)  # start pinger
+        self.delay = Delay(self) # start delay handler
+        
         self.debug = False
 
         # a map of known streams
@@ -240,6 +242,7 @@ class Node(threading.Thread):
 
     def run(self):
         self.pinger.start()
+        self.delay.start()
         # self.fileServer.start()
         while (
             not self.terminate_flag.is_set()
@@ -274,6 +277,7 @@ class Node(threading.Thread):
 
             time.sleep(0.01)
 
+        self.delay.stop()
         self.pinger.stop()
         for t in self.nodes_connected:
             t.stop()
@@ -506,7 +510,7 @@ class Node(threading.Thread):
 class Pinger(threading.Thread):
     def __init__(self, parent):
         self.terminate_flag = threading.Event()
-        super(Pinger, self).__init__()  # CAll Thread.__init__()
+        super(Pinger, self).__init__()  #Call Thread.__init__()
         self.parent = parent
         self.dead_time = 30  # time to disconect from node if not pinged
 
@@ -522,3 +526,31 @@ class Pinger(threading.Thread):
                 i.send("ping")
                 time.sleep(5)
         print("Pinger stopped")
+
+
+class Delay(threading.Thread):
+    def __init__(self, parent):
+        self.terminate_flag = threading.Event()
+        self.delay_flag = threading.Event()
+        
+        super(Delay, self).__init__()  #call Thread.__init__()
+        self.parent = parent
+
+    def stop(self):
+        self.terminate_flag.set()
+        
+    def set_delay_flag(self):
+        self.delay_flag.set()
+
+    def run(self):
+        while (not self.terminate_flag.is_set()): 
+            if(self.delay_flag.is_set()):
+                print("Delay flag set")
+                print("Connected: ", self.parent.nodes_connected)
+                print("parent", self.parent.ip)
+                for i in self.parent.nodes_connected:
+                    print("Delay query", i)
+                    #Ping for new delays (response handled in connect.py)
+                    self.parent.delay_query(i)
+                self.delay_flag.clear()
+        print("Delay handler stopped")
