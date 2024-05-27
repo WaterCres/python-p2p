@@ -442,9 +442,10 @@ class Node(threading.Thread):
                     self.delay_resp(delay, dta['sndr'])
                 else:
                     # respond with t1 and t2
-                    data['t0'] = dta['time']
-                    data['t1'] = str(now)
-                    self.message("delay",data)
+                    data = {
+                        't0':dta['time'],
+                        't1':str(now)}
+                    self.send_message(data, dta['snid'])
             case _:
                 return False
         return True
