@@ -128,7 +128,7 @@ class Node(threading.Thread):
         self.streams = []
         # a map of viewers
         self.viewers = []
-        # a pipe to talk to a child
+        # a collection of pipes to communicate with child processes
         self.pipe = {}
         # a map of delays to peers
         self.delays = {}
@@ -274,6 +274,12 @@ class Node(threading.Thread):
 
             except Exception as e:
                 raise e
+            # we assume lazy evaluation, if that is not the case we crash
+            if ('stein' in self.pipe) and (self.pipe['stein'].poll()):
+                tree = self.pipe['stein'].recv()
+                # clear delays as they are no longer needed
+                self.delays = {}
+                #TODO: connect according to tree,what is the return value of stein NIKO WE NEED ASS
 
             time.sleep(0.01)
 
@@ -426,17 +432,17 @@ class Node(threading.Thread):
             case "watch":
                 tup = (data[0],data[1])
                 self.viewers.append(tup)
-                if self.pipe['str']:
-                    self.pipe['str'].send(('a',tup))
-                if self.pipe['wat']:
+                if 'str' in self.pipe:
+                    self.pipe['str'].send(('a',tup))                        
+                if 'wat' in self.pipe:
                     self.pipe['wat'].send(('a',tup))
 
             case "leave":
                 tup = (data[0],data[1])
                 self.viewers.remove(tup)
-                if self.pipe['str']:
+                if 'str' in self.pipe:
                     self.pipe['str'].send(('r',tup))
-                if self.pipe['wat']:
+                if 'wat' in self.pipe:
                     self.pipe['wat'].send(('a',tup))
 
             case "delay":
@@ -561,6 +567,7 @@ class Delay(threading.Thread):
                 print("Delay flag set")
                 
                 for i in self.parent.peers:
+                    #TODO: stop doing double measurements in a clever way
                     if i.host not in self.parent.delays.keys():
                         # get delay to neighbour if unknown
                         print("Delay query", i)
