@@ -6,12 +6,15 @@ import time
 import hashlib
 import ipaddress
 import urllib.request as req
+from time import sleep
+from multiprocessing import Process, Pipe
+from steiner import steiner_tree, Initiator
 from . import portforwardlib
 from . import crypto_funcs as cf
 
 msg_del_time = 30
 PORT = 65432
-FILE_PORT = 65433
+STRPORT = 65433
 
 
 class NodeConnection(threading.Thread):
@@ -115,7 +118,7 @@ class NodeConnection(threading.Thread):
 
 
 class Node(threading.Thread):
-    def __init__(self, host="", port=65432):
+    def __init__(self, host="", port=PORT, strport=STRPORT):
         super(Node, self).__init__()
 
         self.terminate_flag = threading.Event()
@@ -141,8 +144,10 @@ class Node(threading.Thread):
         self.host = socket.gethostname()
         self.ip = req.urlopen('https://v4.ident.me').read().decode('utf8')  # own ip, will be changed by connection later
         self.port = port
+        self.strport = strport
 
         self.nodes_connected = []
+        self.stream_connections = []
 
         self.requested = []  # list of files we have requested.
         self.msgs = {}  # hashes of recieved messages
@@ -159,6 +164,7 @@ class Node(threading.Thread):
 
         self.banned = []
         portforwardlib.forwardPort(port, port, None, None, False, "TCP", 0, "", False)
+        portforwardlib.forwardPort(strport, strport, None, None, False, "TCP", 0, "", False)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -178,20 +184,21 @@ class Node(threading.Thread):
             else:
                 i.send(json.dumps(message))
 
-    def connect_to(self, host, port=PORT):
+    def connect_to(self, host, port=PORT, str=False):
 
         if not self.check_ip_to_connect(host):
             self.debug_print("connect_to: Cannot connect!!")
             return False
-
-        if len(self.nodes_connected) >= self.max_peers:
-            self.debug_print("Peers limit reached.")
-            return True
-
-        for node in self.nodes_connected:
-            if node.host == host:
-                print("[connect_to]: Already connected with this node.")
+        # checks performed on regular connections, yolo for streams
+        if not str:
+            if len(self.nodes_connected) >= self.max_peers:
+                self.debug_print("Peers limit reached.")
                 return True
+
+            for node in self.nodes_connected:
+                if node.host == host:
+                    print("[connect_to]: Already connected with this node.")
+                    return True
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -215,7 +222,13 @@ class Node(threading.Thread):
                 sock, connected_node_id, host, port
             )
             thread_client.start()
-            self.nodes_connected.append(thread_client)
+            # regular connection to network
+            if not str:
+                self.nodes_connected.append(thread_client)
+            # stream connection
+            else:
+                self.stream_connections.append(thread_client)
+
             self.node_connected(thread_client)
 
         except Exception as e:
@@ -231,6 +244,17 @@ class Node(threading.Thread):
         portforwardlib.forwardPort(
             self.host,
             self.port,
+            None,
+            None,
+            True,
+            "TCP",
+            0,
+            "PYHTON-P2P-NODE",
+            True,
+        )
+        portforwardlib.forwardPort(
+            self.host,
+            self.strport,
             None,
             None,
             True,
@@ -276,10 +300,14 @@ class Node(threading.Thread):
                 raise e
             # we assume lazy evaluation, if that is not the case we crash
             if ('stein' in self.pipe) and (self.pipe['stein'].poll()):
-                tree = self.pipe['stein'].recv()
+                connect = self.pipe['stein'].recv()
                 # clear delays as they are no longer needed
                 self.delays = {}
-                #TODO: connect according to tree,what is the return value of stein NIKO WE NEED ASS
+                self.connect_tree(connect)
+                self.update_viewers()
+                # close all connections
+                # iterate tree object
+                # connect to nodes
 
             time.sleep(0.01)
 
@@ -296,6 +324,76 @@ class Node(threading.Thread):
             self.connect_to(i.host,PORT)
             # if not self.connect_to(i, PORT):
                 #del self.peers[self.peers.index(i)]  # delete wrong / own ip from peers
+
+    def update_viewers(self):
+        for wip,port in self.viewers:
+            if not (wip in [w.host for w in self.stream_connections]):
+                for peer in self.stream_connections:
+                    data = cf.encrypt((wip,port),cf.load_key(peer.id))
+                    self.message("addviewer",data,{'rnid':peer.id})
+                       
+    def construct(self, init):
+        """
+        build a steiner tree to determine where and how to stream
+        workflow
+        1. measure own delay
+        2. make evry1 else measure their delays
+        3. collect all delays
+        4. build tree
+        5. broadcast tree
+        6. clear delay list
+        7. stop process
+        8. connect accordly
+        """
+        # measure own delay
+        iteration = self.delay.it +1
+        self.delay.set_delay_flag(iteration)
+        # tell peers to measure delay
+        # TODO consider implications of sending this message before having our own delays measured
+        self.message("steiner",self.local_ip,{'init':self.id,'it':iteration})
+        # check if delays has been collected
+        while len(self.delays) != len(self.peers):
+            sleep(0.5)
+        # transfer to global delays
+        init.delays[self.local_ip] = self.delays
+        # wait for response from all peers (+1 is our own)
+        while len(init.delays) != len(self.peers)+1:
+            if init.pipe.poll():
+                peer,delay = init.pipe.recv()
+                init.delays[peer] = delay
+        # when all peers have responded
+        tree = steiner_tree(init) # like zhiz ?
+
+
+
+        #somezing return value somewhere pipe to node
+        for peer,connect in tree.items():
+            if str(peer) != str(self.local_ip):
+                context = {"con":connect,
+                        "target":peer,
+                        "it":iteration}
+                self.message("tree", "", context)
+        # tell my parent they suck and im mad and very cool amongst my friends
+        #TODO: consider whether the grandparent should know this
+        init.pipe.send(tree.get_neighbors(self.local_ip))
+
+
+    def build_steiner(self):
+        parent, child = Pipe()
+        self.pipe['stein'] = parent
+        steinproc=Process(target=self.construct, args=(Initiator({},child)))
+        steinproc.daemon = True
+        steinproc.start()
+    
+    def connect_tree(self, connect: dict):
+        # disconnect from everyone
+        for c in self.stream_connections:
+            c.stop()
+        # connect to the new ones
+        for p in connect:
+            self.connect_to(p, port=STRPORT, str=True)
+
+        
 
     def send_message(self, data, reciever=None):
         # time that the message was sent
@@ -432,18 +530,19 @@ class Node(threading.Thread):
             case "watch":
                 tup = (data[0],data[1])
                 self.viewers.append(tup)
-                if 'str' in self.pipe:
-                    self.pipe['str'].send(('a',tup))                        
-                if 'wat' in self.pipe:
-                    self.pipe['wat'].send(('a',tup))
+                self.build_steiner()
+
+            case "addviewer":
+                tup = (data[0],data[1])
+                
 
             case "leave":
                 tup = (data[0],data[1])
-                self.viewers.remove(tup)
+                if tup in self.viewers:
+                    self.viewers.remove(tup)
                 if 'str' in self.pipe:
                     self.pipe['str'].send(('r',tup))
-                if 'wat' in self.pipe:
-                    self.pipe['wat'].send(('a',tup))
+                self.build_steiner()
 
             case "delay":
                 if dta['init'] == self.id:
@@ -468,6 +567,50 @@ class Node(threading.Thread):
                                                 'rnid':dta['snid'],
                                                  't0':dta['time'],
                                                  't1':str(now)})
+            case "steiner":
+                # sort of long running process
+                if self.delay.it < dta['it']:
+                    # start delay process
+                    self.delay.set_delay_flag(dta['it'])
+                    self.delay.initialiser = dta['init']
+                    # let unaware neighbours know we are doing this
+                    self.message("steiner",data,{'init':dta['init'], 'it':dta['it']})
+
+            case "steiner_resp":
+                # was this message for me or do I need to pass it along
+                if dta['init'] == self.id:
+                    # A peer knows its delays
+                    assert 'stein' in self.pipe # otherwise something has gone wrong
+                    self.pipe['stein'].send((dta['origin'],dta['delay']))
+                # # do I know where to send it?
+                # elif dta['init'] in [cn.id for cn in self.nodes_connected]:
+                #     # I know that guy, shoot him a msg
+                #     data = cf.encrypt("",cf.load_key(dta['init']))
+                #     context = { 'rnid':dta['init'],
+                #                 'it':dta['it'],
+                #                 'delay':dta['delay'],
+                #                 'init':dta['init'],
+                #                 'origin':dta['origin']}
+                #     self.message("steiner_resp", data, context)
+                # # I don't know him, drop the msg
+
+            case "tree":
+                # is this relevant
+                if dta['it'] != self.delay.it:
+                    # true I read it
+                    return True
+                # who should act on this
+                target = dta['target']
+                # I need to connect somewhere else
+                if target == self.local_ip:
+                    # where do i connect
+                    connect = dta['con']
+                    # assume sender is already connected to me
+                    del connect[dta['sndr']]
+                    # go do it
+                    self.connect_tree(connect)
+                # TODO: did i get kicked out
+
             case _:
                 return False
         return True
@@ -551,6 +694,8 @@ class Delay(threading.Thread):
         self.terminate_flag = threading.Event()
         self.delay_flag = threading.Event()
         self.empty_delay_flag = threading.Event()
+        self.it = 0
+        self.initialiser = None
         
         super(Delay, self).__init__()  #call Thread.__init__()
         self.parent = parent
@@ -558,22 +703,30 @@ class Delay(threading.Thread):
     def stop(self):
         self.terminate_flag.set()
         
-    def set_delay_flag(self):
+    def set_delay_flag(self, it):
+        self.it = it
         self.delay_flag.set()
 
     def run(self):
-        while (not self.terminate_flag.is_set()): 
+        while (not self.terminate_flag.is_set()):
             if(self.delay_flag.is_set()):
                 print("Delay flag set")
                 
-                for i in self.parent.peers:
-                    #TODO: stop doing double measurements in a clever way
-                    if i.host not in self.parent.delays.keys():
+                for i in self.parent.nodes_connected:
+                    if i.host not in self.parent.delays:
                         # get delay to neighbour if unknown
                         print("Delay query", i)
                         #Ping for new delays (response handled in connect.py)
                         self.parent.delay_query(i)
-                
+                if self.initialiser:
+                    # broadcast
+                    context = { 'init':self.initialiser,
+                                'delay':self.parent.delays,
+                                 'it':self.it,
+                                 'origin':self.parent.local_ip }
+                    self.parent.message("steiner_resp","",context)
+                    # the delays has been sent, we dont need it anymore
+                    self.parent.delays = {}
                 self.delay_flag.clear()
                 
         print("Delay handler stopped")
