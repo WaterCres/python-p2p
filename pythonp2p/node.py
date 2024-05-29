@@ -16,6 +16,15 @@ msg_del_time = 30
 PORT = 65432
 STRPORT = 65433
 
+def find_port(ip, port):
+    """find an open port to receive a stream on, starting at @port"""
+    sck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for i in range(10):
+        if sck.connect_ex((ip,port+i)) == 0:
+            sck.close()
+            return port+i
+    return None
+
 
 class NodeConnection(threading.Thread):
     def __init__(self, main_node, sock, id, host, port):
@@ -304,7 +313,6 @@ class Node(threading.Thread):
                 # clear delays as they are no longer needed
                 self.delays = {}
                 self.connect_tree(connect)
-                self.update_viewers()
                 # close all connections
                 # iterate tree object
                 # connect to nodes
@@ -326,11 +334,7 @@ class Node(threading.Thread):
                 #del self.peers[self.peers.index(i)]  # delete wrong / own ip from peers
 
     def update_viewers(self):
-        for wip,port in self.viewers:
-            if not (wip in [w.host for w in self.stream_connections]):
-                for peer in self.stream_connections:
-                    data = cf.encrypt((wip,port),cf.load_key(peer.id))
-                    self.message("addviewer",data,{'rnid':peer.id})
+        pass
                        
     def construct(self, init):
         """
@@ -363,19 +367,7 @@ class Node(threading.Thread):
                 init.delays[peer] = delay
         # when all peers have responded
         tree = steiner_tree(init) # like zhiz ?
-
-
-
-        #somezing return value somewhere pipe to node
-        for peer,connect in tree.items():
-            if str(peer) != str(self.local_ip):
-                context = {"con":connect,
-                        "target":peer,
-                        "it":iteration}
-                self.message("tree", "", context)
-        # tell my parent they suck and im mad and very cool amongst my friends
-        #TODO: consider whether the grandparent should know this
-        init.pipe.send(tree.get_neighbors(self.local_ip))
+        init.pipe.send(tree)
 
 
     def build_steiner(self):
@@ -385,15 +377,28 @@ class Node(threading.Thread):
         steinproc.daemon = True
         steinproc.start()
     
-    def connect_tree(self, connect: dict):
-        # disconnect from everyone
+    def connect_tree(self, connect: dict, sender=None):
+        # disconnect from everyone but sender
         for c in self.stream_connections:
-            c.stop()
+            if c.host != sender:
+                c.stop()
         # connect to the new ones
-        for p in connect:
-            self.connect_to(p, port=STRPORT, str=True)
+        for end,path in connect.items(): 
+            if ( path[0] == self.local_ip 
+                 and end != self.local_ip
+                 and path[1] not in [c.host for c in self.stream_connections]):
+                self.connect_to(path[1], port=STRPORT, str=True)
+                # the python way of [_:xs]
+                connect.update({end:path[1:]})
+        # pass the list to the next in line
+        for c in self.stream_connections:
+            if c.host != sender:
+                data = cf.encrypt("",cf.load_key(c.id))
+                context = {
+                    'rnid':c.id,
+                    'con':connect,}
+                self.message("tree", data, context)
 
-        
 
     def send_message(self, data, reciever=None):
         # time that the message was sent
@@ -528,14 +533,14 @@ class Node(threading.Thread):
                 self.streams.remove(data)
 
             case "watch":
-                tup = (data[0],data[1])
-                self.viewers.append(tup)
                 self.build_steiner()
 
-            case "addviewer":
+            case "addview":
                 tup = (data[0],data[1])
-                
-
+                # if we did not watch already it was started when we were told to connect
+                assert self.pipe['strm']
+                self.pipe['strm'].send(('a',tup))
+            # TODO: check leave
             case "leave":
                 tup = (data[0],data[1])
                 if tup in self.viewers:
@@ -582,34 +587,22 @@ class Node(threading.Thread):
                     # A peer knows its delays
                     assert 'stein' in self.pipe # otherwise something has gone wrong
                     self.pipe['stein'].send((dta['origin'],dta['delay']))
-                # # do I know where to send it?
-                # elif dta['init'] in [cn.id for cn in self.nodes_connected]:
-                #     # I know that guy, shoot him a msg
-                #     data = cf.encrypt("",cf.load_key(dta['init']))
-                #     context = { 'rnid':dta['init'],
-                #                 'it':dta['it'],
-                #                 'delay':dta['delay'],
-                #                 'init':dta['init'],
-                #                 'origin':dta['origin']}
-                #     self.message("steiner_resp", data, context)
-                # # I don't know him, drop the msg
 
             case "tree":
-                # is this relevant
-                if dta['it'] != self.delay.it:
-                    # true I read it
-                    return True
-                # who should act on this
-                target = dta['target']
-                # I need to connect somewhere else
-                if target == self.local_ip:
-                    # where do i connect
-                    connect = dta['con']
-                    # assume sender is already connected to me
-                    del connect[dta['sndr']]
-                    # go do it
-                    self.connect_tree(connect)
-                # TODO: did i get kicked out
+                sender = dta['sndr']
+                self.viewer(dta['snid'])
+                prt = find_port(self.local_ip, 6666)
+                # start a stream process, presumably only to restream
+                # if not self.pipe['strm']:
+                #     parent,child = Pipe()
+                #     self.pipe['strm'] = parent
+                #     strm = stream.Stream
+                data = cf.encrypt((self.local_ip, prt),cf.load_key(dta['snid']))
+                self.message("addview",data,{'rnid':dta['snid']})
+
+                connect = dta['con']
+                # go do it
+                self.connect_tree(connect, sender)
 
             case _:
                 return False
@@ -629,13 +622,52 @@ class Node(threading.Thread):
             return False
 
     def on_message(self, data, sender, private):
-        raise NotImplementedError
+        """
+        Display a message of type 'msg'
+        @params data the body of the message
+        @params sender ip of the sender of this message
+        @params private bool indicating if this is a private message to self
+        """
+        print(f"{sender} says {data}")
 
     def delay_query(self, rec):
-        raise NotImplementedError
+        """
+        initiate a delay measurement
+        @params rec a node in the network (an entry in peers or nodes_connected)
+        """
+        print("delay query")
+        data = cf.encrypt("delay query",cf.load_key(rec.id))
+        self.message("delay",data,{'init':self.id,'rnid':rec.id})
+        print(data)
+        print("delay query sent")
 
     def delay_resp(self, delay, peer):
-        raise NotImplementedError
+        """
+        gets called from data_handler
+        @params delay is an int ((t3-t0)-(t2-t1)) giving the delay in nano seconds
+        @params peer is the ip of the responding peer
+        """
+        self.delays[peer['sndr']] = delay
+        print("self.delays", self.delays)
+        
+        #Send delay to our neighbour
+        data = cf.encrypt(f'dl_rsp:{delay}', cf.load_key(peer['snid']))
+        self.message("delay",data,{'rnid':peer['snid'], 'init':self.id})
+    
+    def viewer(self, rec, strm):
+        """Tell a streamer that self wants to watch"""
+        port = find_port(self.local_ip, strm.port)
+        if port:
+            strm.port = port
+            """
+            build steiner tree
+            1. tell streamer to build steiner tree
+            2. connect to stream
+            """
+            data = cf.encrypt((self.local_ip,port), cf.load_key(rec))
+            self.message("addviewer", data, {'rnid':rec})
+        else:
+            raise OSError(98)
 
     def loadstate(self, file="state.json"):
         with open(file, "r") as f:
