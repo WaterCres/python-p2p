@@ -320,10 +320,7 @@ class Node(threading.Thread):
         self.network_send(dict, ex)
 
     def send_peers(self):
-        self.message("peers", self.peers)
-
-    def send_streams(self):
-        self.message("strm", self.streams)
+        self.message("peers", self.peers) 
 
     def check_validity(self, msg):
         if not (
@@ -378,7 +375,6 @@ class Node(threading.Thread):
             return False
 
     def data_handler(self, dta, n):
-        now = time.time_ns()
         if not self.check_validity(dta):
             return False
 
@@ -437,7 +433,6 @@ class Node(threading.Thread):
         if node not in self.peers:
             self.peers.append(node)
         self.send_peers()
-        self.send_streams()
 
     def node_disconnected(self, node):
         self.debug_print("node_disconnected: " + node.id)
