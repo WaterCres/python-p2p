@@ -282,7 +282,7 @@ class Node(threading.Thread):
 
     def ConnectToNodes(self):
         for i in self.peers:
-            self.connect_to(i.host,PORT)
+            self.connect_to(i['ip'],PORT)
             # if not self.connect_to(i, PORT):
                 #del self.peers[self.peers.index(i)]  # delete wrong / own ip from peers
 
@@ -290,7 +290,7 @@ class Node(threading.Thread):
         # time that the message was sent
         if reciever:
             data = cf.encrypt(data, cf.load_key(reciever))
-        self.message("msg", data, {"rnid": reciever})
+        self.message("msg", data, overides={"rnid": reciever})
 
     def message(self, type, data, overides={}, ex=[]):
         # time that the message was sent
@@ -312,7 +312,7 @@ class Node(threading.Thread):
         if "sig" not in dict:
             dict["sig"] = cf.sign(data, self.private_key)
 
-        dict = {**dict, **overides}
+        dict.update(overides)
 
         if "time" not in dict:
             dict["time"] = str(time.time_ns())
@@ -387,12 +387,13 @@ class Node(threading.Thread):
         if not dta:
             return False
 
-        type = dta["type"]
+        type = dta["type"] 
         data = dta["data"]
         if type == "peers":
             # peers handling
             for i in data:
-                if self.check_ip_to_connect(i):
+                print("data",data)
+                if self.check_ip_to_connect(i['ip']):
                     self.peers.append(i)
 
             self.debug_print("Known Peers: " + str(self.peers))
@@ -405,12 +406,14 @@ class Node(threading.Thread):
 
     def check_ip_to_connect(self, ip):
         if (
-            ip not in self.peers
+            ip not in [ x['ip'] for x in self.peers]
             and ip != ""
             and ip != self.ip
             and ip != self.local_ip
             and ip not in self.banned
         ):
+            print("chck", ip not in [ x['ip'] for x in self.peers])
+            print("Tre", ip)
             return True
         else:
             return False
@@ -422,7 +425,7 @@ class Node(threading.Thread):
         with open(file, "r") as f:
             peers = json.load(f)
         for i in peers:
-            self.connect_to(i.host)
+            self.connect_to(i['ip'])
 
     def savestate(self, file="state.json"):
         with open(file, "w+") as f:
@@ -430,14 +433,15 @@ class Node(threading.Thread):
 
     def node_connected(self, node):
         self.debug_print("node_connected: " + node.id)
-        if node not in self.peers:
-            self.peers.append(node)
+        if (node.host != self.local_ip
+            and node.host not in [ x['ip'] for x in self.peers]):
+            self.peers.append({'ip':node.host,'id':node.id})
         self.send_peers()
 
     def node_disconnected(self, node):
         self.debug_print("node_disconnected: " + node.id)
-        if node in self.peers:
-            self.peers.remove(node)
+        if node.host in [ x['ip'] for x in self.peers]:
+            self.peers.remove({'ip':node.host,'id':node.id})
 
     def node_message(self, node, data):
         try:
