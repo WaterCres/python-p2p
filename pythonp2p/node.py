@@ -233,7 +233,7 @@ class Node(threading.Thread):
             "TCP",
             0,
             "PYHTON-P2P-NODE",
-            True,
+            False,
         )
 
 
