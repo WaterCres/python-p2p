@@ -167,32 +167,31 @@ class Node(threading.Thread):
             else:
                 i.send(json.dumps(message))
 
-    def connect_to(self, host, port=PORT, str=False):
-
+    def connect_to(self, host, port=PORT):
+        # checks performed on regular connections, yolo for streams
         if not self.check_ip_to_connect(host):
             self.debug_print("connect_to: Cannot connect!!")
             return False
-        # checks performed on regular connections, yolo for streams
-        if not str:
-            if len(self.nodes_connected) >= self.max_peers:
-                self.debug_print("Peers limit reached.")
-                return True
 
-            for node in self.nodes_connected:
-                if node.host == host:
-                    print("[connect_to]: Already connected with this node.")
-                    return True
+        if len(self.nodes_connected) >= self.max_peers:
+            self.debug_print("Peers limit reached.")
+            return True
+
+        for node in self.nodes_connected:
+            if node.host == host:
+                print("[connect_to]: Already connected with this node.")
+                return True
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.debug_print("connecting to %s port %s" % (host, port))
+            print("connecting to %s port %s" % (host, port))
             sock.connect((host, port))
 
             sock.send(self.id.encode("utf-8"))
             connected_node_id = sock.recv(1024).decode("utf-8")
 
             if self.id == connected_node_id:
-                self.debug_print("Possible own ip: " + host)
+                print("Possible own ip: " + host)
                 if ipaddress.ip_address(host).is_private:
                     self.local_ip = host
                 else:
@@ -206,16 +205,12 @@ class Node(threading.Thread):
             )
             thread_client.start()
             # regular connection to network
-            if not str:
-                self.nodes_connected.append(thread_client)
-                self.node_connected(thread_client)
+            self.nodes_connected.append(thread_client)
+            self.node_connected(thread_client)
             # stream connection
-            else:
-                return thread_client
-
 
         except Exception as e:
-            self.debug_print(
+            print(
                 "connect_to: Could not connect with node. (" + str(e) + ")"
             )
 
