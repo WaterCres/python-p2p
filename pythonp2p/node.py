@@ -407,8 +407,6 @@ class Node(threading.Thread):
             and ip != self.local_ip
             and ip not in self.banned
         ):
-            print("chck", ip not in [ x['ip'] for x in self.peers])
-            print("Tre", ip)
             return True
         else:
             return False
