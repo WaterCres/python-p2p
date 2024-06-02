@@ -307,11 +307,11 @@ class Node(threading.Thread):
         if "sig" not in dict:
             dict["sig"] = cf.sign(data, self.private_key)
 
-        dict.update(overides)
-
         if "time" not in dict:
             dict["time"] = str(time.time_ns())
-
+        
+        dict.update(overides)
+        
         self.network_send(dict, ex)
 
     def send_peers(self):
